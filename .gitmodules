@@ -1,0 +1,3 @@
+[submodule "src/hri_game_testbed"]
+	path = src/hri_game_testbed
+	url = https://github.com/roboav8r/hri_game_testbed.git
