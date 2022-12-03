@@ -13,9 +13,10 @@ To this end, this project employs a two-layer hierarchical planning & control ar
 Specifically, this project implements a **Monte-Carlo Tree Search (MCTS)** as a high-level planner, and a **Constrained Optimal Controller** for the low-level motion controller. These elements are discussed in detail in the following section.
 
 # Repo overview
-This is the main workspace, a meta-repo that contains all necessary dependencies as submodules.
+This is the main workspace, a meta-repo that contains all necessary dependencies as submodules. `game_theory_ws` is a Robot Operating System workspace, intended to have all the elements needed to demonstrate a hierarchical controller on a (simulated) robot. At present, the only level is a simulated cargo pickup/dropoff task, taking place in an indoor hospital environment with known map.
 
 ## hri_game_testbed
+The testbed uses a 
 
 ## hierarchical_game_control_ros
 
@@ -25,7 +26,13 @@ This is the main workspace, a meta-repo that contains all necessary dependencies
 
 ### game_manager_node
 
-# Setup and installation (optional, if running the code is desired)
+# Initial Results
+
+# Closing Thoughts
+
+# Usage (optional, if running the code is desired)
+
+## Setup and installation 
 This assumes you have ROS Noetic installed and are using Ubuntu 20.04.
 
 First, clone the repository and its submodules. At a terminal in your home directory (`~`):
@@ -44,3 +51,11 @@ cd ~/game_theory_ws/src/hri_game_testbed
 export GAZEBO_MODEL_PATH=$GAZEBO_MODEL_PATH:`pwd`/models
 export GAZEBO_RESOURCE_PATH=$GAZEBO_RESOURCE_PATH:`pwd`/worlds
 ```
+
+# Collaboration and Future Work
+If you have an idea for an autonomous robot application or are interested in collaborating, please raise an issue or send me an e-mail.
+
+
+## General performance fixes
+As of December 2022, this repo is meant to be a proof of concept and has many areas for improvement. Some known issues & potential fixes include:
+- Implement the optimal controller as a `ros_control` interface/controller
