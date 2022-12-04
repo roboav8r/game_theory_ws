@@ -56,6 +56,15 @@ export GAZEBO_RESOURCE_PATH=$GAZEBO_RESOURCE_PATH:`pwd`/worlds
 If you have an idea for an autonomous robot application or are interested in collaborating, please raise an issue or send me an e-mail.
 
 
-## General performance fixes
-As of December 2022, this repo is meant to be a proof of concept and has many areas for improvement. Some known issues & potential fixes include:
+## Potential Improvements
+As of December 2022, this repo is meant to be a proof of concept and has many areas for improvement. 
+
+Code/implementation improvements:
+- Launch localization and mapping; use actual ROS data instead of using the map as an OpenCV matrix
 - Implement the optimal controller as a `ros_control` interface/controller
+- Separate `graph_datatypes` from the `highlevel_planner_node` and make it more generic and modular; currently specific to the cargo pickup/dropoff problem
+- Update access modifiers in the hl, ll, and mcts classes; everything is currently public
+
+Algorithm improvements:
+- Instead of planning only the next waypoint, plan an entire motion path
+
