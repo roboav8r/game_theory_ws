@@ -31,7 +31,7 @@ This repository retains the testbed and hierarchical controller as submodules, w
 ## hri_game_testbed
 The testbed is implemented in ROS Gazebo and allows controlled, rapid development of the hierarchical planning & control architecture. It is intended to be a stand-in for real robot hardware until the hierarchical controller can safely be deployed on robot hardware. As such, it provides simulated sensor data and can accept robot motion commands via standard ROS message types.
 
-At present, the only level is a simulated cargo pickup/dropoff task for a [PR2 robot](http://wiki.ros.org/Robots/PR2), taking place in an indoor hospital environment with known map. There are two variants, `worlds/hospital.world` and `hospital_empty.world`, which respectively do and do not contain humans.
+At present, the only level is a simulated cargo pickup/dropoff task for a [PR2 robot](http://wiki.ros.org/Robots/PR2), taking place in an indoor hospital environment with known map. There are two variants, `worlds/hospital.world` and `worlds/hospital_empty.world`, which respectively do and do not contain humans.
 
 ![The Empty Hospital Gazebo world](data/gazebo.png)
 
@@ -47,12 +47,26 @@ The PR2 can be commanded to move by publishing a `geometry_msgs/Twist` message t
 ```
 
 ## hierarchical_game_control_ros
+The game theoretical, hierarchal planner-controller is implemented in the [hierarchal_game_control_ros](https://github.com/roboav8r/hierarchical_game_control_ros) package. The high-level planner and low-level controller work in tandem to interpret sensor measurements, select an optimal plan of action, and send commands to the (simulated) robot. At present the system is designed for a single task: cargo pickup and delivery. However, the software could be extended to work in additional applications (see [Future Work](#future-work)).
 
 ### lowlevel_controller_node
+
+#### Inputs
+The low level controller node has three inputs:
+- The robot's current state $x$, comprised of its 2D position $[x_{robot}, y_{robot}]$, heading $\theta$, and velocity $v$. This information is received through a `nav_msgs/Odometry` ROS message on the `/base_pose_ground_truth` topic and necessary conversions are made by [robotOdomCallback in lowlevel_controller_node.h](https://github.com/roboav8r/hierarchical_game_control_ros/blob/99c2929aae19267068c40bffcc398295d80bbd75/include/lowlevel_controller_node.h#L54-L65).
+- A 2D navigation goal $[x_{goal}, y_{goal}]$, in the map frame. $[x_{goal}, y_{goal}]$ is received as a `move_base_msgs/MoveBaseGoal` message on the `/nav_goal` topic.
+- LiDAR range data from the laser scanner, received as a `sensor_msgs/LaserScan` ROS message on the `/base_scan` topic. The range measurements are converted from the robot's frame into the `map` frame and saved by the [scanCallback function in lowlevel_controller_node.h](https://github.com/roboav8r/hierarchical_game_control_ros/blob/99c2929aae19267068c40bffcc398295d80bbd75/include/lowlevel_controller_node.h#L67-L81).
+
+The ROS subscribers are created in [lowlevel_controller_node.cpp](https://github.com/roboav8r/hierarchical_game_control_ros/blob/99c2929aae19267068c40bffcc398295d80bbd75/src/lowlevel_controller_node.cpp#L20-L29)
+
+#### Outputs
+Given the inputs above, the controller computes the optimal control output $\bar{u} = [\omega \\ a]^T$, where $\omega = \dot{\theta}$ is the yaw rate (rotation about the robot's $+z$ axis), and $a=\dot{v}$ is the linear acceleration (translation about the robot's $+x$ axis). The optimal control outputs are sent to the robot base as a `geometry_msgs/Twist` ROS message on the `/base_controller/command` topic by a [publisher in `lowlevel_controller_node.cpp`](https://github.com/roboav8r/hierarchical_game_control_ros/blob/99c2929aae19267068c40bffcc398295d80bbd75/src/lowlevel_controller_node.cpp#L18).
+
+#### Algorithm
 Uses IFOPT as a backend solver.
+Constraints, variables, and objective functions
 The controller node computes the control input 
-$$\bar{u} = \begin{bmatrix} \omega\\ a \end{bmatrix}$$
-where $\omega = \dot{\theta}$ is the yaw rate, and $a=\dot{v}$ is the linear acceleration. 
+
 given ...
 the target state $\bar{x}$ comprised of robot position $[x_{robot}, y_{robot}]$ velocity $v$, and heading $\theta$ that minimizes the following cost functions:
 $$J_{goal} = w_{goal}[(x_{robot} - x_{goal} + v_tcos(\theta_t)\Delta t)^2 + (y_{robot} - y_{goal} + v_tsin(\theta_t)\Delta t)^2]$$
@@ -142,7 +156,7 @@ export GAZEBO_RESOURCE_PATH=$GAZEBO_RESOURCE_PATH:`pwd`/worlds
 roslaunch hierarchical_game_control_ros hospital_demo.launch                    # For an empty hospital environment
 roslaunch hierarchical_game_control_ros hospital_demo.launch level:=hospital    # For a populated environment
 ```
-# Collaboration and Future Work
+# Future Work
 If you have an idea for an autonomous robot application or are interested in collaborating, please raise an issue or send me an e-mail.
 
 
