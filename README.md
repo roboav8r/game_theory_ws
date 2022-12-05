@@ -6,26 +6,45 @@ This repository is intended to be a central hub for developing game-theoretical 
 As of December 2022, this project is organized as follows:
 - This repository ([game_theory_ws](https://github.com/roboav8r/game_theory_ws)), which contains the project writeup, initial results and future plans, and installation instructions
 - A Robot Operating System (ROS)-Gazebo simulator testbed ([hri_game_testbed](https://github.com/roboav8r/hri_game_testbed)), which serves as a controlled, repeatable development environment prior to deployment on robot hardware, and
-- A game-theoretical, hierarchical planner-controller module ([hierarchical_game_control_ros](https://github.com/roboav8r/hierarchical_game_control_ros)), which receives state variable observations from `hri_game_testbed`, computes an optimal course of action/control inputs, and sends them to the simulated robot.
+- A ROS-enabled game-theoretical, hierarchical planner-controller module ([hierarchical_game_control_ros](https://github.com/roboav8r/hierarchical_game_control_ros)), which receives state variable observations from `hri_game_testbed`, computes an optimal course of action/control inputs, and sends them to the simulated robot.
 
 These elements are discussed in further detail below. For collaboration or any questions/comments/concerns about this project, feel free to [contact me](mailto@john.a.duncan@utexas.edu) or [raise an issue](https://github.com/roboav8r/game_theory_ws/issues/new/choose)!
 
 # Motivation and Hierarchical Control Approach
-Robots and autonomous systems are expanding into a range of complex, dynamic, and populated operating environments. Novel service applications see robots operating in airports, hospitals, museums, city centers, and battlefields. However, robot action planning in such environments is inherently challenging: the correct course of action is situationally-dependent, or *situated*[TODO Bohus paper], and depends on the robot's goals and capabilities, and the status of the environment and agents within it (i.e. humans and vehicles).
+Robots and autonomous systems are expanding into a range of complex, dynamic, and populated operating environments. Novel service applications see robots operating in airports, hospitals, museums, city centers, and battlefields. However, robot action planning in such environments is inherently challenging: the correct course of action is situationally-dependent, or [*situated*](http://erichorvitz.com/naacl_directions_dialog.pdf), and depends on the robot's goals and capabilities in addition to the status of the environment and agents within it (i.e. humans and vehicles).
 
 The motivating example for this project is *human-robot interaction* in such environments. New service applications will require robots to accomplish service tasks while acting alongside humans in various roles (teammates, pedestrians, adversaries). Potential service tasks include social navigation, cargo/parcel delivery, information sharing, and leading/following behaviors. Since these tasks involve a dynamic combination of multiple discrete and continuous elements, robots in dynamic environments require a planning and control architecture that can act optimally across a range of potential operating states and conditions.
 
-To this end, this project employs a two-layer hierarchical planning & control architecture. This architecture can enable robots & autonomous systems to affect intelligent behaviors amidst uncertain or changing states. The architecture is motivated by the implementation in Thakkar *et al* "[Hierarchical Control for Cooperative Teams in Competitive Autonomous Racing](https://arxiv.org/abs/2204.13070)" in which the authors employ a high-level, low-frequency discrete planner with a low-level, high-frequency continuous controller (see Figure below).
+To this end, this project employs a two-layer hierarchical planning & control architecture. This architecture could enable robots & autonomous systems to affect intelligent behaviors amidst uncertain or changing states. The architecture is directly motivated by the implementation in Thakkar *et al* "[Hierarchical Control for Cooperative Teams in Competitive Autonomous Racing](https://arxiv.org/abs/2204.13070)" in which the authors employ a high-level, low-frequency discrete planner with a low-level, high-frequency continuous controller (see Figure below).
 
 ![Thakkar et al's hierarchical control architecture](data/thakkar.png)
 
-Specifically, this project implements a **Monte-Carlo Tree Search (MCTS)** as a high-level planner, and a **Constrained Optimal Controller** for the low-level motion controller. These elements are discussed in detail in the following section.
+Specifically, this project implements a **Monte-Carlo Tree Search (MCTS)** to plan high-level robot behaviors, and a **Nonlinear Constrained Optimal Controller** to send motion control commands. These elements are discussed in detail in the following section.
 
-# Repo overview
-This is the main workspace, a meta-repo that contains all necessary dependencies as submodules. `game_theory_ws` is a Robot Operating System workspace, intended to have all the elements needed to demonstrate a hierarchical controller on a (simulated) robot. At present, the only level is a simulated cargo pickup/dropoff task, taking place in an indoor hospital environment with known map.
+# System Overview
+The main system elements interact as shown in the diagram below.
+
+![System Diagram](data/SystemDiagram.png)
+
+This repository retains the testbed and hierarchical controller as submodules, while the hierarchical controller receives data from & sends commands to the testbed. Please see the following subsections for additional information on the testbed & hierarchical controller.
 
 ## hri_game_testbed
-The testbed uses a 
+The testbed is implemented in ROS Gazebo and allows controlled, rapid development of the hierarchical planning & control architecture. It is intended to be a stand-in for real robot hardware until the hierarchical controller can safely be deployed on robot hardware. As such, it provides simulated sensor data and can accept robot motion commands via standard ROS message types.
+
+At present, the only level is a simulated cargo pickup/dropoff task for a [PR2 robot](http://wiki.ros.org/Robots/PR2), taking place in an indoor hospital environment with known map. There are two variants, `worlds/hospital.world` and `hospital_empty.world`, which respectively do and do not contain humans.
+
+![The Empty Hospital Gazebo world](data/gazebo.png)
+
+The map can be launched by following the instructions in the [Usage](#usage) section and publishes relevant information about the PR2 on the following ROS topics:
+```
+/base_pose_ground_truth       # Robot odometry as a nav_msgs/Odometry message
+/base_scan                    # Laser ranging data as a sensor_msgs/LaserScan message
+```
+
+The PR2 can be commanded to move by publishing a `geometry_msgs/Twist` message to the following topic:
+```
+/base_controller/command
+```
 
 ## hierarchical_game_control_ros
 
