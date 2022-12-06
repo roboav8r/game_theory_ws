@@ -126,9 +126,9 @@ $$
 $$
 
 
-where ${\cdot}^0$ notation denotes a _current_ value of the state variable. Dynamics constraints are defined in the [constraints section of `solver_params.h`](https://github.com/roboav8r/hierarchical_game_control_ros/blob/99c2929aae19267068c40bffcc398295d80bbd75/include/solver_params.h#L105-L215), while state and input variable limits are part of their respective [variable set entries](https://github.com/roboav8r/hierarchical_game_control_ros/blob/99c2929aae19267068c40bffcc398295d80bbd75/include/solver_params.h#L8-L100).
+where ${\cdot}^0$ notation denotes a _current_ value of the state variable. Dynamics constraints are defined in the [constraints section of `solver_params.h`](https://github.com/roboav8r/hierarchical_game_control_ros/blob/99c2929aae19267068c40bffcc398295d80bbd75/include/solver_params.h#L105-L215), while state and input variable limits are part of their respective [variable set entries](https://github.com/roboav8r/hierarchical_game_control_ros/blob/99c2929aae19267068c40bffcc398295d80bbd75/include/solver_params.h#L8-L100). Additionally, `solver_params.h` includes analytical Jacobians for the cost and dynamics functions. These were derived manually and included to improve real-time solver performance, but are not strictly necessary.
 
-Lastly, `solver_params.h` includes analytical Jacobians for the cost and dynamics functions. These were derived manually and included to improve real-time solver performance, but are not strictly necessary.
+Lastly, these constraints are added to the [`lowlevel_controller_node.cpp`](https://github.com/roboav8r/hierarchical_game_control_ros/blob/99c2929aae19267068c40bffcc398295d80bbd75/src/lowlevel_controller_node.cpp#L46-L72) and run in a continuous, high-frequency loop. During each iteration, [current state variables are updated with the most recent ROS state data](https://github.com/roboav8r/hierarchical_game_control_ros/blob/99c2929aae19267068c40bffcc398295d80bbd75/src/lowlevel_controller_node.cpp#L89-L91) and the solver object computes a solution to the nonlinear program, publishing it to the robot testbed.
 
 ### highlevel_planner_node
 The planner node is a ROS node which, given the current state of the environment (game) and robot agent (player), computes the player's optimal move. The planner node then sends the action to the robot controller, as appropriate. The planner logic is implemented in a separate header file (`graph_datatypes.h`), which contains the Monte Carlo Tree Search implementation and associated data structures (`GameState`/node and `Tree`). The main ROS node is implemented in `highlevel_planner_node.cpp` and `highlevel_planner_node.h`. Since the project is currently simulated, the ROS node also handles some game logic at an abstract level. For example, this node sets boolean values to denote if the robot is carrying cargo rather than do a dynamic simulation of the action.
@@ -144,24 +144,76 @@ The planner node's inputs consist of the variables that define the state of the 
 The planner node publishes the optimal robot action after running MCTS. Actions can be output in one of two ways:
 - Navigation goals $[x_{goal}, y_{goal}]$ are published as a `move_base_msgs/MoveBaseGoal` message on the `/nav_goal` topic by a [publisher in `highlevel_planner_node.cpp`](https://github.com/roboav8r/hierarchical_game_control_ros/blob/99c2929aae19267068c40bffcc398295d80bbd75/src/highlevel_planner_node.cpp#L25), in the `map` frame. 
 - Actions such as `PickUp` or `DropOff` are set as variables and processed internally by `highlevel_planner_node.cpp`. Since these capabilities are handled abstractly (i.e. no pickup or drop off actions are simulated in the testbed), these actions can be replaced by actual movement commands in hardware implementations of the planner.
+- To help interpret the planner's intent during development, the planner also publishes an OpenCV image containing the map, current state belief, and the action selected.
 
 #### Parameters
-- A map of the operating environment. By default, the planner loads the map on startup. The map is an occupancy grid, obtained by a mapping run of the environment and saved for later use. Sample maps of the hospital level are provided in `hri_game_testbed/maps/*.pgm`.
-- Map parameters: [TODO] free threshold , grid resolution, map negate/mode... `hri_game_testbed/maps/*.yaml`
+- A map of the operating environment. By default, the planner loads the map on startup and converts it to an OpenCV matrix for easier processing. The map is an occupancy grid, obtained by a mapping run of the environment and saved for later use. Sample maps of the hospital level are provided in `hri_game_testbed/maps/*.pgm`. `clean_hospital_map` is used by default.
+- ROS map parameters: the map origin location, free/occupied threshold values, grid resolution are provided in `hri_game_testbed/maps/*.yaml` and enable the spatial and occupancy information to be properly interpreted. The parameters are discussed [on the ROS wiki](http://wiki.ros.org/map_server).
 - [Solver time $dt$](https://github.com/roboav8r/hierarchical_game_control_ros/blob/99c2929aae19267068c40bffcc398295d80bbd75/include/highlevel_planner_node.h#L36): Amount of time between the ROS timer call/amount of time to allow the Monte Carlo Tree Search to run. Currently set to 3 seconds.
 - Cargo distance: the threshold beneath which the robot is considered close enough to pick up or drop off cargo from the map.
-- Movement step size: [TODO] 1 meter 
+- `movementStepSize`: how much the planner advances the robot's position during a "move" action. Currently 1 meter. 
 
 #### Algorithm
-To compute the optimal move:
+`highlevel_planner_node` is the main ROS node which runs the planner in a low-frequency loop (currently $\Deltat= 3s$). During each iteration, `highlevel_planner_node`:
+- Creates a new `GameState` node using the current state information.
+- Creates a new `Tree` with the current state as root.
+- Runs a search on the `Tree` object. 
+- Renders a visual representation of the map, current state, and optimal move in an OpenCV display window.
+These steps are implemented in the main loop in [`highlevel_planner_node.cpp`](https://github.com/roboav8r/hierarchical_game_control_ros/blob/99c2929aae19267068c40bffcc398295d80bbd75/src/highlevel_planner_node.cpp#L71-L77).
 
-Mostly implemented in `graph_datatypes.h`
+The MCTS algorithm and solver-specific datatypes are included in `include/graph_datatypes.h`:
 
+##### GameState (Node) Variables
+The game state is completely characterized by:
+- Pixel indices of the robot, cargo pickup site, and dropoff site. This includes the `robotXPix`,`robotYPix`,`pickupXPix`,`pickupYPix`, `destXPix`, and `destYPix` variables. Note that these positions are converted between pixel indices in the OpenCV occupancy grid and $[x,y]$ positions in the `map` frame.
+- Current location of the cargo. This is defined by the boolean variables `robotHasCargo`, `cargoAtPickup`, and `cargoAtDest`.
 
+Each `GameState` node must also retain the following information for MCTS:
+- `nTimesVisited`: The number of times the node has been simulated during the tree search.
+- `score`: The total objective result from all simulations at the node.
+- `parent`: The `GameState` which preceded the current state.
+
+##### GameState Available Moves
+When a `GameState` node is initialized, the [`getAvailMoves()` subroutine](https://github.com/roboav8r/hierarchical_game_control_ros/blob/99c2929aae19267068c40bffcc398295d80bbd75/include/graph_datatypes.h#L135-L217) computes the available actions (moves) as follows:
+- If the robot is within `cargoDist` of the cargo pickup location and the pickup location has the cargo, the robot can pick up cargo.
+- If the robot is within `cargoDist` of the cargo delivery destination and the robot has the cargo, the robot can drop off cargo.
+- To check for movement availability, pixels along the `PlusX`, `PlusY`, `MinusX`, `MinusY` directions in the `map` frame are checked to ensure they are below the `freeThreshold`. If each pixel value between the robot's current position and the `movementStepSize` is free, this is a valid movement action.
+
+##### GameState Transition Logic
+The function [`propagate(Move)`](https://github.com/roboav8r/hierarchical_game_control_ros/blob/99c2929aae19267068c40bffcc398295d80bbd75/include/graph_datatypes.h#L306-L343) accepts a Move as input and advances the GameState as follows:
+- Movement Moves (`PlusX`, `PlusY`,..) increment the robot's position (`robotXPix`,`robotYPix`) appropriately.
+- `PickUp` and `DropOff` moves set the cargo boolean variables `robotHasCargo`, `cargoAtPickup`, and `cargoAtDest` appropriately.
+
+`propagate(Move)` is also used during MCTS simulation.
+
+##### Terminal Conditions
+The following terminal conditions are defined in [the `gameResult` function](https://github.com/roboav8r/hierarchical_game_control_ros/blob/99c2929aae19267068c40bffcc398295d80bbd75/include/graph_datatypes.h#L345-L359):
+- Cargo successfully arriving at the destination results in a **win and a score of +1**.
+- If the simulated game executes `maxNumMoves=50` moves without delivering the cargo, this results in a **loss and a score of 0**.
+
+If the game state is not terminal, a value of `-1` is returned to continue simulation.
+
+##### MCTS Algorithm
 
 # Initial Results
 
-# Closing Thoughts
+# Discussion of Results
+
+# Future Work
+If you have an idea for an autonomous robot application or are interested in collaborating, please raise an issue or send me an e-mail.
+
+## Potential Improvements
+As of December 2022, this repo is meant to be a proof of concept and has many areas for improvement. 
+
+Code/implementation improvements:
+- Launch localization and mapping; use actual ROS data instead of using the map as an OpenCV matrix
+- Implement the optimal controller as a `ros_control` interface/controller
+- Separate `graph_datatypes` from the `highlevel_planner_node` and make it more generic and modular; currently specific to the cargo pickup/dropoff problem
+- Update access modifiers in the hl, ll, and mcts classes; everything is currently public
+
+Algorithm improvements:
+- Instead of planning only the next waypoint, plan an entire motion path
+
 
 # Usage (optional, if running the code is desired)
 
@@ -190,18 +242,3 @@ export GAZEBO_RESOURCE_PATH=$GAZEBO_RESOURCE_PATH:`pwd`/worlds
 roslaunch hierarchical_game_control_ros hospital_demo.launch                    # For an empty hospital environment
 roslaunch hierarchical_game_control_ros hospital_demo.launch level:=hospital    # For a populated environment
 ```
-# Future Work
-If you have an idea for an autonomous robot application or are interested in collaborating, please raise an issue or send me an e-mail.
-
-
-## Potential Improvements
-As of December 2022, this repo is meant to be a proof of concept and has many areas for improvement. 
-
-Code/implementation improvements:
-- Launch localization and mapping; use actual ROS data instead of using the map as an OpenCV matrix
-- Implement the optimal controller as a `ros_control` interface/controller
-- Separate `graph_datatypes` from the `highlevel_planner_node` and make it more generic and modular; currently specific to the cargo pickup/dropoff problem
-- Update access modifiers in the hl, ll, and mcts classes; everything is currently public
-
-Algorithm improvements:
-- Instead of planning only the next waypoint, plan an entire motion path
