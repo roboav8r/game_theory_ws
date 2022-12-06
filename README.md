@@ -62,6 +62,9 @@ The ROS subscribers are created in [lowlevel_controller_node.cpp](https://github
 #### Outputs
 Given the inputs above, the controller computes the optimal control output $u = [\omega \\ a]^T$, where $\omega = \dot{\theta}$ is the yaw rate (rotation about the robot's $+z$ axis), and $a=\dot{v}$ is the linear acceleration (translation about the robot's $+x$ axis). The optimal control outputs are sent to the robot base as a `geometry_msgs/Twist` ROS message on the `/base_controller/command` topic by a [publisher in `lowlevel_controller_node.cpp`](https://github.com/roboav8r/hierarchical_game_control_ros/blob/99c2929aae19267068c40bffcc398295d80bbd75/src/lowlevel_controller_node.cpp#L18).
 
+#### Parameters
+The controller is parametrized by cost weights $w_{i}$ as described in the Algorithm section.
+
 #### Algorithm
 The low level controller models the control problem as a nonlinear program comprised of a **cost function** to be minimized by adjusting **variables** subject to **constraints**. [Optimizer Interface (IFOPT)](https://github.com/ethz-adrl/ifopt), a C++/Eigen-based interface to solvers such as IPOPT and SNOPT, then solves the constrained optimization problem.
 
@@ -78,7 +81,7 @@ J_{obst} = -\sum^{N_{obst}}_{i=1}w_{axial}log[cos\theta_t(x_{obst,i} - x_{robot}
 -\sum^{N_{obst}}_{i=1}w_{lat}log[-sin\theta_t(x_{obst,i} - x_{robot}) + cos\theta_t(y_{obst,i} - y_{robot})]^2\\
 ```
 which penalize distance from the navigation goal, large control inputs, and proximity to obstacles, respectively. This cost structure is derived from Lasse Peters _et al_, ["Inferring Objectives in Continuous Dynamic Games from Noise-Corrupted Partial State Observations"](https://arxiv.org/pdf/2106.03611.pdf), 
-who use a similar cost structure for an autonomous driving scenario. Notably, the obstacle cost used in this controller is modified; the $N_{obst}$ laser range measurements from the LiDAR scan are converted into obstacle position measurements in the _map_ frame $[x_{obst,i}, y_{obst,i}]$, and separated into lateral and axial components in the _robot_ frame. This is to enable different weights for lateral and axial obstacles. Note in general, each cost is weighted to enable different controller behavior as appropriate. The cost functions are implemented in a separate header file, [`solver_params.h`](https://github.com/roboav8r/hierarchical_game_control_ros/blob/99c2929aae19267068c40bffcc398295d80bbd75/include/solver_params.h#L351-L526), which is included in the controller node.
+who use a similar cost structure for an autonomous driving scenario. Notably, the obstacle cost used in this controller is modified; the $N_{obst}$ laser range measurements from the LiDAR scan are converted into obstacle position measurements in the _map_ frame $[x_{obst,i}, y_{obst,i}]$, and separated into lateral and axial components in the _robot_ frame. This is to enable different weights for lateral and axial obstacles. The cost functions are implemented in a separate header file, [`solver_params.h`](https://github.com/roboav8r/hierarchical_game_control_ros/blob/99c2929aae19267068c40bffcc398295d80bbd75/include/solver_params.h#L351-L526), which is included in the controller node.
 
 To optimize the cost functions, the solver adjusts the controller inputs $\bar{u}$ and the desired state variables $\bar{x}$:
 
@@ -128,12 +131,33 @@ where ${\cdot}^0$ notation denotes a _current_ value of the state variable. Dyna
 Lastly, `solver_params.h` includes analytical Jacobians for the cost and dynamics functions. These were derived manually and included to improve real-time solver performance, but are not strictly necessary.
 
 ### highlevel_planner_node
+The planner node is a ROS node which, given the current state of the environment (game) and robot agent (player), computes the player's optimal move. The planner node then sends the action to the robot controller, as appropriate. The planner logic is implemented in a separate header file (`graph_datatypes.h`), which contains the Monte Carlo Tree Search implementation and associated data structures (`GameState`/node and `Tree`). The main ROS node is implemented in `highlevel_planner_node.cpp` and `highlevel_planner_node.h`. Since the project is currently simulated, the ROS node also handles some game logic at an abstract level. For example, this node sets boolean values to denote if the robot is carrying cargo rather than do a dynamic simulation of the action.
 
 #### Inputs
+The planner node's inputs consist of the variables that define the state of the robot and cargo within the environment:
+- The robot's current 2D position $[x_{robot}, y_{robot}]$. This information is received through a `nav_msgs/Odometry` ROS message on the `/base_pose_ground_truth` topic and necessary conversions are made by [robotOdomCallback in highlevel_planner_node.h](https://github.com/roboav8r/hierarchical_game_control_ros/blob/99c2929aae19267068c40bffcc398295d80bbd75/include/highlevel_planner_node.h#L102-L112).
+- The 2D location where the cargo will be picked up, $[x_{cargo}, y_{cargo}]$. Currently hardcoded in [`highlevel_planner_node.h`](https://github.com/roboav8r/hierarchical_game_control_ros/blob/99c2929aae19267068c40bffcc398295d80bbd75/include/highlevel_planner_node.h#L55-L56) but should eventually become an input.
+- The 2D location where the cargo will be delivered, $[x_{dest}, y_{dest}]$. Currently hardcoded in [`highlevel_planner_node.h`](https://github.com/roboav8r/hierarchical_game_control_ros/blob/99c2929aae19267068c40bffcc398295d80bbd75/include/highlevel_planner_node.h#L59-L60) but should eventually become an input.
+- Boolean variables depicting the current location of the cargo: $robotHasCargo, cargoAtPickup, cargoAtDest$. Currently hardcoded in [`highlevel_planner_node.h`](https://github.com/roboav8r/hierarchical_game_control_ros/blob/99c2929aae19267068c40bffcc398295d80bbd75/include/highlevel_planner_node.h#L52-L54) but should eventually become an input.
 
 #### Outputs
+The planner node publishes the optimal robot action after running MCTS. Actions can be output in one of two ways:
+- Navigation goals $[x_{goal}, y_{goal}]$ are published as a `move_base_msgs/MoveBaseGoal` message on the `/nav_goal` topic by a [publisher in `highlevel_planner_node.cpp`](https://github.com/roboav8r/hierarchical_game_control_ros/blob/99c2929aae19267068c40bffcc398295d80bbd75/src/highlevel_planner_node.cpp#L25), in the `map` frame. 
+- Actions such as `PickUp` or `DropOff` are set as variables and processed internally by `highlevel_planner_node.cpp`. Since these capabilities are handled abstractly (i.e. no pickup or drop off actions are simulated in the testbed), these actions can be replaced by actual movement commands in hardware implementations of the planner.
+
+#### Parameters
+- A map of the operating environment. By default, the planner loads the map on startup. The map is an occupancy grid, obtained by a mapping run of the environment and saved for later use. Sample maps of the hospital level are provided in `hri_game_testbed/maps/*.pgm`.
+- Map parameters: [TODO] free threshold , grid resolution, map negate/mode... `hri_game_testbed/maps/*.yaml`
+- [Solver time $dt$](https://github.com/roboav8r/hierarchical_game_control_ros/blob/99c2929aae19267068c40bffcc398295d80bbd75/include/highlevel_planner_node.h#L36): Amount of time between the ROS timer call/amount of time to allow the Monte Carlo Tree Search to run. Currently set to 3 seconds.
+- Cargo distance: the threshold beneath which the robot is considered close enough to pick up or drop off cargo from the map.
+- Movement step size: [TODO] 1 meter 
 
 #### Algorithm
+To compute the optimal move:
+
+Mostly implemented in `graph_datatypes.h`
+
+
 
 # Initial Results
 
