@@ -313,7 +313,7 @@ cd ~/game_theory_ws
 catkin_make # or catkin build
 ```
 
-# Running the Hierarchical Controller Demonstration
+## Running the Hierarchical Controller Demonstration
 Ensure the workspace is properly sourced, and then run the demo using the following commands:
 ```
 cd ~/game_theory_ws
