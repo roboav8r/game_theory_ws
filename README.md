@@ -60,70 +60,80 @@ The low level controller node has three inputs:
 The ROS subscribers are created in [lowlevel_controller_node.cpp](https://github.com/roboav8r/hierarchical_game_control_ros/blob/99c2929aae19267068c40bffcc398295d80bbd75/src/lowlevel_controller_node.cpp#L20-L29)
 
 #### Outputs
-Given the inputs above, the controller computes the optimal control output $\bar{u} = [\omega \\ a]^T$, where $\omega = \dot{\theta}$ is the yaw rate (rotation about the robot's $+z$ axis), and $a=\dot{v}$ is the linear acceleration (translation about the robot's $+x$ axis). The optimal control outputs are sent to the robot base as a `geometry_msgs/Twist` ROS message on the `/base_controller/command` topic by a [publisher in `lowlevel_controller_node.cpp`](https://github.com/roboav8r/hierarchical_game_control_ros/blob/99c2929aae19267068c40bffcc398295d80bbd75/src/lowlevel_controller_node.cpp#L18).
+Given the inputs above, the controller computes the optimal control output $u = [\omega \\ a]^T$, where $\omega = \dot{\theta}$ is the yaw rate (rotation about the robot's $+z$ axis), and $a=\dot{v}$ is the linear acceleration (translation about the robot's $+x$ axis). The optimal control outputs are sent to the robot base as a `geometry_msgs/Twist` ROS message on the `/base_controller/command` topic by a [publisher in `lowlevel_controller_node.cpp`](https://github.com/roboav8r/hierarchical_game_control_ros/blob/99c2929aae19267068c40bffcc398295d80bbd75/src/lowlevel_controller_node.cpp#L18).
 
 #### Algorithm
-Uses IFOPT as a backend solver.
-Constraints, variables, and objective functions
-The controller node computes the control input 
+The low level controller models the control problem as a nonlinear program comprised of a **cost function** to be minimized by adjusting **variables** subject to **constraints**. [Optimizer Interface (IFOPT)](https://github.com/ethz-adrl/ifopt), a C++/Eigen-based interface to solvers such as IPOPT and SNOPT, then solves the constrained optimization problem.
 
-given ...
-the target state $\bar{x}$ comprised of robot position $[x_{robot}, y_{robot}]$ velocity $v$, and heading $\theta$ that minimizes the following cost functions:
-$$J_{goal} = w_{goal}[(x_{robot} - x_{goal} + v_tcos(\theta_t)\Delta t)^2 + (y_{robot} - y_{goal} + v_tsin(\theta_t)\Delta t)^2]$$
-$$J_{input} = w_{yaw}(\omega)^2 + w_{acc}(a)^2$$
-$$J_{obst} = -\sum^{N_{obst}}_{i=1}w_{axial}log[cos\theta_t(x_{obst,i} - x_{robot}) + sin\theta_t(y_{obst,i} - y_{robot})]^2\\
--\sum^{N_{obst}}_{i=1}w_{lat}log[-sin\theta_t(x_{obst,i} - x_{robot}) + cos\theta_t(y_{obst,i} - y_{robot})]^2
+The low level controller minimizes the following cost functions:
+```math
+J_{goal} = w_{goal}[(x_{robot} - x_{goal} + v_tcos(\theta_t)\Delta t)^2 + (y_{robot} - y_{goal} + v_tsin(\theta_t)\Delta t)^2]
+```
+```math
+J_{input} = w_{yaw}(\omega)^2 + w_{acc}(a)^2\\
+```
+```math
+J_{obst} = -\sum^{N_{obst}}_{i=1}w_{axial}log[cos\theta_t(x_{obst,i} - x_{robot}) + sin\theta_t(y_{obst,i} - y_{robot})]^2\\
+
+-\sum^{N_{obst}}_{i=1}w_{lat}log[-sin\theta_t(x_{obst,i} - x_{robot}) + cos\theta_t(y_{obst,i} - y_{robot})]^2\\
+```
+which penalize distance from the navigation goal, large control inputs, and proximity to obstacles, respectively. This cost structure is derived from Lasse Peters _et al_, ["Inferring Objectives in Continuous Dynamic Games from Noise-Corrupted Partial State Observations"](https://arxiv.org/pdf/2106.03611.pdf), 
+who use a similar cost structure for an autonomous driving scenario. Notably, the obstacle cost used in this controller is modified; the $N_{obst}$ laser range measurements from the LiDAR scan are converted into obstacle position measurements in the _map_ frame $[x_{obst,i}, y_{obst,i}]$, and separated into lateral and axial components in the _robot_ frame. This is to enable different weights for lateral and axial obstacles. Note in general, each cost is weighted to enable different controller behavior as appropriate. The cost functions are implemented in a separate header file, [`solver_params.h`](https://github.com/roboav8r/hierarchical_game_control_ros/blob/99c2929aae19267068c40bffcc398295d80bbd75/include/solver_params.h#L351-L526), which is included in the controller node.
+
+To optimize the cost functions, the solver adjusts the controller inputs $\bar{u}$ and the desired state variables $\bar{x}$:
+
+$$
+\bar{u} = \left[ \begin{array}{c}
+    \omega' \\
+    a'
+  \end{array} \right]; \\
+\bar{x} = \left[ \begin{array}{c}
+    x_{robot}' \\
+    y_{robot}' \\
+    \theta' \\
+    v'
+  \end{array} \right]
 $$
 
-Subject to the following constraints:
+where ${\bar{\cdot}}$ notation denotes a variable set to solve, and ${\cdot}'$ denotes an individual variable to be solved. Both variable sets are defined in [the variables section of `solver_params.h`](https://github.com/roboav8r/hierarchical_game_control_ros/blob/99c2929aae19267068c40bffcc398295d80bbd75/include/solver_params.h#L8-L100).
+
+Subject to the following dynamics constraints and variable limits:
+
 $$
-C_{dyn}: \begin{bmatrix} 
-x_{robot}'\\
-y_{robot}'\\
-\theta'\\
-v'\\
-\end{bmatrix} = 
-\begin{bmatrix} 
-x_{robot}^0 + \Delta t v'cos\theta'\\
-y_{robot}^0 + \Delta t v'sin\theta'\\
-\theta^0 + \omega \Delta t\\
-v^0 + a\Delta t\\
-\end{bmatrix} \\
-C_{state}: v_t \in [v_{min},v_{max}], \theta_t \in [-\pi,\pi]\\
-C_{input}: \omega \in [\omega_{min},\omega_{max}], a \in [a_{min},a_{max}] \\
+C_{dyn}: \left[ \begin{array}{c}
+    x_{robot}' \\
+    y_{robot}' \\
+    \theta' \\
+    v'
+  \end{array} \right] = 
+  \left[ \begin{array}{c}
+    x_{robot}^0 + \Delta t v'cos\theta'\\
+    y_{robot}^0 + \Delta t v'sin\theta'\\
+    \theta^0 + \omega' \Delta t\\
+    v^0 + a'\Delta t\\
+  \end{array} \right];\\
+$$
+
+$$
+  C_{state}: v_t \in \left[v_{min},v_{max}\right], \theta_t \in \left[-\pi,\pi\right];\\
+$$
+
+$$
+  C_{input}: \omega' \in \left[\omega_{min},\omega_{max}\right], a' \in \left[a_{min},a_{max}\right];\\
 $$
 
 
-The cost functions have the following Jacobians, taken with respect to each target state variable:
-$$
-{\partial J_{goal} \over \partial \bar{x}} = 
-\begin{bmatrix} 
-{\partial J_{goal}} / {\partial x_{robot}}  \\
-{\partial J_{goal}} / {\partial y_{robot}} \\
-{\partial J_{goal}} / {\partial \theta_t} \\
-{\partial J_{goal}} / {\partial v_t} \\
-\end{bmatrix} = 
-\begin{bmatrix}
-2w_{goal}(x_{robot} - x_{goal} + v_tcos\theta_t\Delta t) \\
-2w_{goal}(y_{robot} - y_{goal} + v_tsin\theta_t\Delta t) \\
-2w_{goal}v_t\Delta t[(x_{robot} - x_{goal})sin\theta_t + (y_{robot} - y_{goal})cos\theta_t] \\
-2w_{goal}\Delta t[v_t\Delta t + (x_{robot} - x_{goal})cos\theta_t + (y_{robot} - y_{goal})sin\theta_t] \\
-\end{bmatrix}\\
-{\partial J_{acc} \over \partial \bar{x}} = 
-\begin{bmatrix} 
-{\partial J_{acc}} / {\partial x_{robot}}  \\
-{\partial J_{acc}} / {\partial y_{robot}} \\
-{\partial J_{acc}} / {\partial \theta_t} \\
-{\partial J_{acc}} / {\partial v_t} \\
-\end{bmatrix} = 
-\begin{bmatrix}
-TODO
-\end{bmatrix}
-$$
+where ${\cdot}^0$ notation denotes a _current_ value of the state variable. Dynamics constraints are defined in the [constraints section of `solver_params.h`](https://github.com/roboav8r/hierarchical_game_control_ros/blob/99c2929aae19267068c40bffcc398295d80bbd75/include/solver_params.h#L105-L215), while state and input variable limits are part of their respective [variable set entries](https://github.com/roboav8r/hierarchical_game_control_ros/blob/99c2929aae19267068c40bffcc398295d80bbd75/include/solver_params.h#L8-L100).
 
-Note that obstacle positions $[x_{obst,i}, y_{obst,i}]$, robot state variables $[x_{robot}, y_{robot}]$, and heading $\theta$ are in the map/global frame, not the robot frame.
+Lastly, `solver_params.h` includes analytical Jacobians for the cost and dynamics functions. These were derived manually and included to improve real-time solver performance, but are not strictly necessary.
 
 ### highlevel_planner_node
+
+#### Inputs
+
+#### Outputs
+
+#### Algorithm
 
 # Initial Results
 
