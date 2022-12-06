@@ -1,3 +1,6 @@
 [submodule "src/hri_game_testbed"]
 	path = src/hri_game_testbed
 	url = https://github.com/roboav8r/hri_game_testbed.git
+[submodule "src/hierarchical_game_control_ros"]
+	path = src/hierarchical_game_control_ros
+	url = https://github.com/roboav8r/hierarchical_game_control_ros.git
