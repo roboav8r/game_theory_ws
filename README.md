@@ -218,25 +218,72 @@ $$
 $$
 
 
-# Initial Results
+# Results
+Qualitative results and observations from the initial system demonstration are provided here.
 
-# Discussion of Results
+## Low Level Controller
+During initial trials, the low level controller took between **10-40 ms** to solve the nonlinear control program, corresponding to a rate of 25-100 Hz. 
+![Static output of the Low Level Controller](data/solver.png)
+![Animated output of the Low Level Controller](data/ll_solver.gif)
 
-# Future Work
-If you have an idea for an autonomous robot application or are interested in collaborating, please raise an issue or send me an e-mail.
+The system is able to successfully navigate to a specified waypoint goal using the included objective functions:
+
+![Animated output of the Low Level Controller Navigating to a Goal](data/nav_success.gif)
+
+When a navigation goal _behind_ the robot is supplied, the robot moves backwards toward the goal, instead of rotating to face it and then moving forward:
+
+![Animated output of the Low Level Controller Navigating to a Goal](data/nav_backwards.gif)
+
+When the robot moves into a more congested region of the map, the solver converges; however, the optimal solution is not the target goal waypoint. The solution seems to place the robot into a static configuration where it is unable to exit and make progress toward the goal:
+
+![Animated output of the Low Level Controller Navigating to a Goal](data/obst_avoid.gif)
+
+## High Level Planner
+During initial trials, the MCTS planner **simulated a total of 50,000 - 100,000 nodes during the 3 second planning period**. Typical scores at the root node ranged from **0-50**.
+
+![Static output of the Planner](data/planner.png)
+
+When integrated with the simulator and controller, the planner is able to compute and send commands to the system effectively. The simulated robot's controller responds to the planner's waypoints. The planner does not appear to converge on a single move, and instead appears to issue commands inconsistently and in opposition to one another. For example, in the animation below, the planner commands the robot back and forth, resulting in minimal progress toward picking up or dropping off cargo.
+
+![Animated output of the Low Level Controller Navigating to a Goal](data/integrated_demo.gif)
+
+# Interpretation of Results & Future Work
+
+The initial results of this project provided valuable feedback toward the system's design and guide further development. Specific conclusions and future work include:
+- **The planner-controller system is feasible for real-time usage**. Both the controller and planner could run continuously and perform a suitable number of computations for real-time usage. A mobile robot platform possesses the computational resources required to run the controller-planner. 
+- **Modifications to the cost functions in the optimal controller**. The robot's motion displayed two undesirable characteristics: it backed toward goals instead of rotating to drive forwards toward them; and the robot base stopped when entering a congested area. This suggests that the controller has converged onto a solution that is locally optimal, but that does not reflect desired motion. To address these issues, a penalty could be implemented for rearward motion. The vehicle obstacle avoidance model from [Peters _et al_](https://arxiv.org/pdf/2106.03611.pdf) likely needs to be replaced with an obstacle avoidance model designed for a robot with LiDAR scanning rangefinder.
+- **Modifications to the MCTS planner**. The planner failed to converge on a single solution during planning runs, and published seemingly contradictory actions. This could be a result of a very sparse reward structure in which the `score` is much less than the total number of simulations, `nVisited`. Specifically:
+
+$$ 
+    w_i << N \implies \frac{w_i}{n_i} << c\sqrt(\frac{log(N)}{n_i})
+$$
+
+The exploration term in the UCT value is much larger than the exploitation term, which could explain the seemingly random behavior in the planner. To address the issue, modifications to the rewards, actions, and search algorithms should be explored. Namely:
+- The objective score from a win can be increased 
+- The exploration constant $c$ can be adjusted
+- The search can be guided towards known, valuable actions using a heuristic function (as in the $A*$ search), or using a model for the value
+- Instead of planning the next action at each timestep, an optimal _sequence_ of actions could be planned upon request. This may be more suitable 
+
+In conclusion, although the system did not affect the desired series of robot actions, a game-theoretical approach to robot action planning and execution is feasible. Modifications to the planning and controller algorithms implemented in this project could yield desirable behaviors for robots in dynamic environments.
 
 ## Potential Improvements
-As of December 2022, this repo is meant to be a proof of concept and has many areas for improvement. 
+As of December 2022, this repo is meant to be a proof of concept and development environment. Based on the initial project results, potential improvements to the project include:
+
+Controller Algorithm improvements:
+- Explore different obstacle avoidance models using LiDAR
+- Add penalty for rearward motion
+
+Planner Algorithm improvements:
+- Experiment with increasing score for wins
+- Add incremental reward/score, e.g. an intermediate goal for picking up cargo
+- Guide the search using a heuristic function or model
+- Reduce the number of planning steps and intermediate goals by planning entire navigation segments, instead of the next action
 
 Code/implementation improvements:
 - Launch localization and mapping; use actual ROS data instead of using the map as an OpenCV matrix
 - Implement the optimal controller as a `ros_control` interface/controller
 - Separate `graph_datatypes` from the `highlevel_planner_node` and make it more generic and modular; currently specific to the cargo pickup/dropoff problem
 - Update access modifiers in the hl, ll, and mcts classes; everything is currently public
-
-Algorithm improvements:
-- Instead of planning only the next waypoint, plan an entire motion path
-
 
 # Usage (optional, if running the code is desired)
 
@@ -260,8 +307,17 @@ export GAZEBO_MODEL_PATH=$GAZEBO_MODEL_PATH:`pwd`/models
 export GAZEBO_RESOURCE_PATH=$GAZEBO_RESOURCE_PATH:`pwd`/worlds
 ```
 
-# Running the Hierarchical Controller Demonstration
+Build the workspace. At a terminal:
 ```
+cd ~/game_theory_ws
+catkin_make # or catkin build
+```
+
+# Running the Hierarchical Controller Demonstration
+Ensure the workspace is properly sourced, and then run the demo using the following commands:
+```
+cd ~/game_theory_ws
+source devel/setup.bash
 roslaunch hierarchical_game_control_ros hospital_demo.launch                    # For an empty hospital environment
 roslaunch hierarchical_game_control_ros hospital_demo.launch level:=hospital    # For a populated environment
 ```
