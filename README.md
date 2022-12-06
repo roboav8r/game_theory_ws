@@ -154,7 +154,7 @@ The planner node publishes the optimal robot action after running MCTS. Actions 
 - `movementStepSize`: how much the planner advances the robot's position during a "move" action. Currently 1 meter. 
 
 #### Algorithm
-`highlevel_planner_node` is the main ROS node which runs the planner in a low-frequency loop (currently $\Deltat= 3s$). During each iteration, `highlevel_planner_node`:
+`highlevel_planner_node` is the main ROS node which runs the planner in a low-frequency loop (currently $\Delta t= 3s$). During each iteration, `highlevel_planner_node`:
 - Creates a new `GameState` node using the current state information.
 - Creates a new `Tree` with the current state as root.
 - Runs a search on the `Tree` object. 
@@ -194,6 +194,29 @@ The following terminal conditions are defined in [the `gameResult` function](htt
 If the game state is not terminal, a value of `-1` is returned to continue simulation.
 
 ##### MCTS Algorithm
+The MCTS implementation is a straightforward implementation of the original algorithm by Coulom _et al_, "Efficient Selectivity and Backup Operators in Monte-Carlo Tree Search" (2007), and uses the Upper Confidence bounds applied to Trees (UCT) algorithm devised by Koscis & Szepesvári in "Bandit based Monte-Carlo Planning" (2006). For this project, MCTS is implemented in [`Tree.Search()`](https://github.com/roboav8r/hierarchical_game_control_ros/blob/99c2929aae19267068c40bffcc398295d80bbd75/include/graph_datatypes.h#L381-L461). The steps are:
+
+- [**Initialization**](https://github.com/roboav8r/hierarchical_game_control_ros/blob/99c2929aae19267068c40bffcc398295d80bbd75/include/graph_datatypes.h#L383-L385): The search begins at the current state, which is initially set as the root of the tree.
+- [**Selection**](https://github.com/roboav8r/hierarchical_game_control_ros/blob/99c2929aae19267068c40bffcc398295d80bbd75/include/graph_datatypes.h#L389-L393): The current node selects a child node with the **highest** value according to the UCT formula until a leaf is found. This is implemented in [`GameState.selectNextNode()`](https://github.com/roboav8r/hierarchical_game_control_ros/blob/99c2929aae19267068c40bffcc398295d80bbd75/include/graph_datatypes.h#L250-L279) and computes children's UCT values using [`GameState.computeChildUctValue`](https://github.com/roboav8r/hierarchical_game_control_ros/blob/99c2929aae19267068c40bffcc398295d80bbd75/include/graph_datatypes.h#L225-L236). In the event that multiple child nodes have equal value, a random child node is selected from the highest valued children. 
+
+Recall that a leaf is a node with unexplored child nodes, computed by the helper function [`GameState.isLeaf()`](https://github.com/roboav8r/hierarchical_game_control_ros/blob/99c2929aae19267068c40bffcc398295d80bbd75/include/graph_datatypes.h#L220-L223), and the UCT formula computes the child node value as follows:
+
+$$
+    v_i = \frac{w_i}{n_i} + c\sqrt(\frac{log(N)}{n_i})
+$$
+
+where $w_i$ is the child node's `score`, $n_i$ is the child node's `nTimesVisited`, $N$ is the parent node's `nTimesVisited`, and $c$ is an exploration constant = $\sqrt(2)$.
+
+- [**Expansion**](https://github.com/roboav8r/hierarchical_game_control_ros/blob/99c2929aae19267068c40bffcc398295d80bbd75/include/graph_datatypes.h#L395-L414): Once a leaf is found, a child node is added to the leaf. A valid, unexecuted `Move` is selected. A [specialized `GameState` constructor](https://github.com/roboav8r/hierarchical_game_control_ros/blob/99c2929aae19267068c40bffcc398295d80bbd75/include/graph_datatypes.h#L67-L90) creates the child node from the `GameState` parent and the selected `Move`.
+- [**Simulate**](https://github.com/roboav8r/hierarchical_game_control_ros/blob/99c2929aae19267068c40bffcc398295d80bbd75/include/graph_datatypes.h#L427-L437): Random, uniform moves are selected from the child's set of available moves until a terminal state is reached. When a terminal state is reached, the simulate step add's the resulting score to the child node's `score` and increments the child node's `nTimesVisited`.
+- [**Backpropagate**](https://github.com/roboav8r/hierarchical_game_control_ros/blob/99c2929aae19267068c40bffcc398295d80bbd75/include/graph_datatypes.h#L440-L455): The search moves to successive parent nodes, updating `score` and incrementing `nTimesVisited` for each node until the search reaches the root.
+
+The search starts again at the selection step until the MCTS exceeds planning time $\Delta t = 3s$. Then, the best known result is saved as `Tree.bestMove`. To exploit the best known move, [`Tree.selectBestMove()`](https://github.com/roboav8r/hierarchical_game_control_ros/blob/99c2929aae19267068c40bffcc398295d80bbd75/include/graph_datatypes.h#L281-L304) selects the root's child with the highest value
+
+$$
+    v_i = \frac{w_i}{n_i}
+$$
+
 
 # Initial Results
 
